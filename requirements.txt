@@ -1,3 +1,5 @@
 streamlit
 supabase
 python-dotenv
+fpdf
+pillow
