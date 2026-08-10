@@ -119,10 +119,10 @@ with aba_calculadora:
         st.markdown("### Dados da Impressão")
         col1, col2 = st.columns(2)
         with col1:
-            peso_g = st.number_input("Peso do modelo (gramas)", min_value=0.1, value=00.1, step=1.0)
+            peso_g = st.number_input("Peso do modelo (gramas)", min_value=0.1, value=50, step=1.0)
             tempo_min = st.number_input("Tempo de impressão (minutos)", min_value=1, value=0, step=10)
         with col2:
-            tempo_operador = st.number_input("Seu tempo de trabalho (minutos)", min_value=0, value=0, step=5)
+            tempo_operador = st.number_input("Seu tempo de trabalho (minutos)", min_value=0, value=1, step=5)
             margem_lucro = st.number_input("Lucro Desejado (%)", min_value=0, value=100, step=10)
             
         if st.button("Calcular Preço Final", type="primary", use_container_width=True):
