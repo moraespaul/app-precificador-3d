@@ -101,25 +101,53 @@ aba_calculadora, aba_pdv, aba_produtos, aba_filamentos, aba_configuracoes = st.t
 )
 
 # ------------------------------------------
-# ABA 1: CALCULADORA
+# ABA 1: CALCULADORA (AGORA MULTI-FILAMENTO)
 # ------------------------------------------
 with aba_calculadora:
     st.header("Calcular Novo Produto")
     if not lista_filamentos:
         st.warning("Cadastre um filamento na aba 'Filamentos' primeiro!")
     else:
+        opcoes_filamentos = {f"{f['material']} {f['cor']}": f for f in lista_filamentos}
+        
         col_nome, col_foto = st.columns(2)
         with col_nome:
             nome_peca = st.text_input("Nome do Produto (opcional):", placeholder="Ex: Vaso Groot 15cm")
-            opcoes_filamentos = {f"{f['material']} {f['cor']}": f for f in lista_filamentos}
-            filamento_selecionado = st.selectbox("Filamento usado:", options=list(opcoes_filamentos.keys()))
+            
+            # --- SELEÇÃO MÚLTIPLA DE FILAMENTOS ---
+            filamentos_selecionados = st.multiselect(
+                "Filamento(s) usado(s):", 
+                options=list(opcoes_filamentos.keys()),
+                default=[list(opcoes_filamentos.keys())[0]],
+                help="Selecione mais de um material se for uma impressão multicolorida."
+            )
         with col_foto:
             imagem_upload = st.file_uploader("Foto do Produto (opcional)", type=["png", "jpg", "jpeg"])
         
         st.markdown("### Dados da Impressão")
+        
+        # --- CAIXAS DE PESO DINÂMICAS ---
+        pesos_por_filamento = {}
+        peso_total_g = 0.0
+        
+        if not filamentos_selecionados:
+            st.warning("Selecione pelo menos um filamento para continuar.")
+            st.stop()
+        
+        st.write("**Pesos por Material (gramas):**")
+        # Divide as colunas dinamicamente com base em quantos filamentos foram selecionados
+        cols_pesos = st.columns(len(filamentos_selecionados))
+        for i, fil_nome in enumerate(filamentos_selecionados):
+            with cols_pesos[i]:
+                peso_atual = st.number_input(f"{fil_nome}", min_value=0.1, value=50.0, step=1.0, key=f"peso_{fil_nome}")
+                pesos_por_filamento[fil_nome] = peso_atual
+                peso_total_g += peso_atual
+                
+        st.write("---")
+        
         col1, col2 = st.columns(2)
         with col1:
-            peso_g = st.number_input("Peso do modelo (gramas)", min_value=0.1, value=50.0, step=1.0)
+            st.info(f"⚖️ **Peso Total da Peça:** {peso_total_g:.1f}g")
             tempo_min = st.number_input("Tempo de impressão (minutos)", min_value=1, value=120, step=10)
         with col2:
             tempo_operador = st.number_input("Seu tempo de trabalho (minutos)", min_value=0, value=15, step=5)
@@ -127,12 +155,24 @@ with aba_calculadora:
             
         if st.button("Calcular Preço Final", type="primary", use_container_width=True):
             config = obter_configuracoes()
-            filamento = opcoes_filamentos[filamento_selecionado]
-            
             taxa_falhas = float(config.get('taxa_falhas_pct', 10.0))
-            peso_com_perda = peso_g * (1 + (taxa_falhas / 100))
-            custo_material = (peso_com_perda / 1000) * filamento['preco_por_kg']
             
+            # --- CÁLCULO MÚLTIPLO DE MATERIAIS ---
+            custo_material_total = 0.0
+            texto_filamentos_usados = [] # Para salvar no banco de forma descritiva
+            
+            for fil_nome, peso_g in pesos_por_filamento.items():
+                filamento_dados = opcoes_filamentos[fil_nome]
+                peso_com_perda = peso_g * (1 + (taxa_falhas / 100))
+                custo_parcial = (peso_com_perda / 1000) * filamento_dados['preco_por_kg']
+                
+                custo_material_total += custo_parcial
+                texto_filamentos_usados.append(f"{fil_nome} ({peso_g}g)")
+                
+            # Ex: "PLA Branco (30.0g), PETG Vermelho (20.0g)"
+            string_banco_filamento = " + ".join(texto_filamentos_usados)
+            
+            # Restante dos cálculos
             tempo_horas = tempo_min / 60
             potencia_kw = float(config['potencia_impressora_watts']) / 1000
             custo_energia = potencia_kw * tempo_horas * float(config['preco_kwh'])
@@ -140,7 +180,7 @@ with aba_calculadora:
             custo_desgaste = tempo_horas * float(config.get('custo_desgaste_por_hora', 0.50))
             custo_mao_obra = (tempo_operador / 60) * float(config.get('valor_hora_operador', 30.00))
             
-            custo_total = custo_material + custo_energia + custo_desgaste + custo_mao_obra
+            custo_total = custo_material_total + custo_energia + custo_desgaste + custo_mao_obra
             valor_lucro = custo_total * (margem_lucro / 100)
             preco_final = custo_total + valor_lucro
             
@@ -157,8 +197,8 @@ with aba_calculadora:
 
                 dados_pdv = {
                     "nome_peca": nome_peca.strip(),
-                    "filamento_usado": filamento_selecionado,
-                    "peso_g": peso_g,
+                    "filamento_usado": string_banco_filamento, # Agora salva a lista toda com os pesos
+                    "peso_g": peso_total_g,
                     "tempo_minutos": tempo_min,
                     "custo_total": custo_total,
                     "preco_final": preco_final,
@@ -170,7 +210,7 @@ with aba_calculadora:
             st.divider()
             st.subheader("📊 Detalhamento dos Custos Reais")
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Material", f"R\$ {custo_material:.2f}")
+            m1.metric("Material", f"R\$ {custo_material_total:.2f}")
             m2.metric("Energia", f"R\$ {custo_energia:.2f}")
             m3.metric("Desgaste", f"R\$ {custo_desgaste:.2f}")
             m4.metric("Mão de Obra", f"R\$ {custo_mao_obra:.2f}")
@@ -191,24 +231,20 @@ with aba_pdv:
         
         orcamentos_salvos = listar_orcamentos()
         if orcamentos_salvos:
-            # Cria a lista de opções (já está em ordem alfabética pela busca do banco)
-            opcoes_pdv = {f"{o['nome_peca']} - R$ {o['preco_final']:.2f}": o for o in orcamentos_salvos}
+            texto_pesquisa = st.text_input("🔍 Buscar produto por nome:", placeholder="Digite para filtrar...")
             
-            # UI/UX: O seletor vira uma barra de pesquisa inteligente!
-            item_selecionado = st.selectbox(
-                "🔍 Pesquise e selecione o produto:", 
-                options=list(opcoes_pdv.keys()),
-                index=None, # Faz começar vazio
-                placeholder="Digite o nome do produto..."
-            )
-            
-            # O cartão do produto só aparece DEPOIS que o usuário escolher algo
-            if item_selecionado:
+            if texto_pesquisa:
+                orcamentos_filtrados = [o for o in orcamentos_salvos if texto_pesquisa.lower() in o['nome_peca'].lower()]
+            else:
+                orcamentos_filtrados = orcamentos_salvos
+                
+            if orcamentos_filtrados:
+                opcoes_pdv = {f"{o['nome_peca']} - R$ {o['preco_final']:.2f}": o for o in orcamentos_filtrados}
+                item_selecionado = st.selectbox("Selecione o item:", options=list(opcoes_pdv.keys()))
                 item_dados = opcoes_pdv[item_selecionado]
                 
                 st.markdown("---")
                 
-                # UI/UX: Cartão de Produto Compacto
                 col_img_card, col_detalhes_card = st.columns([1, 1.5])
                 
                 with col_img_card:
@@ -227,7 +263,7 @@ with aba_pdv:
                     
                     quantidade_item = st.number_input("Quantidade:", min_value=1, value=1, step=1)
                     
-                    if st.button("Adicionar ao Carrinho", type="primary", use_container_width=True):
+                    if st.button("Adicionar", type="primary", use_container_width=True):
                         st.session_state.carrinho.append({
                             "id": item_dados['id'],
                             "nome": item_dados['nome_peca'],
@@ -235,9 +271,10 @@ with aba_pdv:
                             "preco_unit": float(item_dados['preco_final']),
                             "subtotal": quantidade_item * float(item_dados['preco_final'])
                         })
-                        # Ordena o carrinho alfabeticamente após adicionar
                         st.session_state.carrinho = sorted(st.session_state.carrinho, key=lambda x: x['nome'])
                         st.rerun()
+            else:
+                st.warning("Nenhum produto encontrado com esse nome.")
         else:
             st.info("O seu catálogo está vazio. Calcule peças na aba Calculadora.")
 
@@ -323,6 +360,7 @@ with aba_produtos:
                     novo_preco = st.number_input("Preço de Venda (R$)", value=float(produto_dados['preco_final']), step=1.0)
                     nova_foto = st.file_uploader("Trocar Foto (Deixe em branco para manter a atual)", type=["png", "jpg", "jpeg"])
                     
+                    st.write(f"*(Materiais base: {produto_dados['filamento_usado']})*")
                     st.write(f"*(Custo de Produção salvo: R$ {produto_dados['custo_total']:.2f})*")
                     
                     if st.form_submit_button("💾 Salvar Alterações", type="primary"):
